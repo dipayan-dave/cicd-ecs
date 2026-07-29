@@ -53,10 +53,10 @@ resource "aws_codebuild_project" "build" {
   }
 
   environment {
-    compute_type                = "BUILD_GENERAL1_SMALL"
-    image                       = "aws/codebuild/standard:7.0"
-    type                        = "LINUX_CONTAINER"
-    privileged_mode             = true # MANDATORY for Docker builds
+    compute_type    = "BUILD_GENERAL1_SMALL"
+    image           = "aws/codebuild/standard:7.0"
+    type            = "LINUX_CONTAINER"
+    privileged_mode = true # MANDATORY for Docker builds
 
     environment_variable {
       name  = "AWS_DEFAULT_REGION"
