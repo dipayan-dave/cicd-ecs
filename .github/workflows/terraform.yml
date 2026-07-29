@@ -34,11 +34,20 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
+      - name: Verify AWS role variable
+        run: |
+          if [ -z "${{ vars.AWS_ROLE_TO_ASSUME }}" ]; then
+            echo "AWS_ROLE_TO_ASSUME is not set in GitHub Actions Variables."
+            exit 1
+          fi
+          echo "AWS_ROLE_TO_ASSUME is configured."
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+          role-session-name: github-actions-${{ github.run_id }}
 
       - name: Terraform fmt
         run: terraform fmt -check -recursive
