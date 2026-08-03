@@ -45,7 +45,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
-          oidc: true
           audience: sts.amazonaws.com
 
       - name: Terraform init
@@ -95,7 +94,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
-          oidc: true
           audience: sts.amazonaws.com
 
       - name: Download plan artifact
