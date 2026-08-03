@@ -14,6 +14,19 @@ on:
         required: false
         default: 'false'
         type: boolean
+      bootstrap:
+        description: 'Create the S3 backend bucket and DynamoDB lock table before using the remote backend'
+        required: true
+        default: 'false'
+        type: boolean
+      backend_bucket_name:
+        description: 'S3 bucket name for Terraform remote state backend'
+        required: false
+        type: string
+      backend_dynamodb_table_name:
+        description: 'DynamoDB table name for Terraform state locking'
+        required: false
+        type: string
 
 permissions:
   id-token: write
@@ -27,6 +40,12 @@ jobs:
   terraform-plan:
     name: Terraform - Plan & Validate
     runs-on: ubuntu-latest
+    if: github.event.inputs.bootstrap != true
+    env:
+      BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET || github.event.inputs.backend_bucket_name }}
+      BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY || 'cicd/terraform.tfstate' }}
+      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}
+      BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE || github.event.inputs.backend_dynamodb_table_name }}
     #environment: dev
     steps:
       - name: Checkout
@@ -54,7 +73,12 @@ jobs:
           audience: sts.amazonaws.com
 
       - name: Terraform Init
-        run: terraform init -input=false
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${BACKEND_BUCKET}" \
+            -backend-config="key=${BACKEND_KEY}" \
+            -backend-config="region=${BACKEND_REGION}" \
+            ${BACKEND_DYNAMODB_TABLE:+-backend-config="dynamodb_table=${BACKEND_DYNAMODB_TABLE}"}
 
       - name: Terraform fmt (check)
         run: terraform fmt -check -diff
@@ -75,7 +99,12 @@ jobs:
     name: Terraform - Apply
     runs-on: ubuntu-latest
     needs: terraform-plan
-    if: github.event.inputs.destroy != 'true' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    if: github.event.inputs.bootstrap != true && github.event.inputs.destroy != true && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    env:
+      BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET || github.event.inputs.backend_bucket_name }}
+      BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY || 'cicd/terraform.tfstate' }}
+      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}
+      BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE || github.event.inputs.backend_dynamodb_table_name }}
     #environment: dev
     steps:
       - name: Checkout
@@ -102,8 +131,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      - name: Terraform Init                             
-        run: terraform init -input=false
+      - name: Terraform Init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${BACKEND_BUCKET}" \
+            -backend-config="key=${BACKEND_KEY}" \
+            -backend-config="region=${BACKEND_REGION}" \
+            ${BACKEND_DYNAMODB_TABLE:+-backend-config="dynamodb_table=${BACKEND_DYNAMODB_TABLE}"}
 
       - name: Download plan artifact
         uses: actions/download-artifact@v4
@@ -114,12 +148,56 @@ jobs:
       - name: Terraform Apply                         
         run: terraform apply -input=false tfplan
 
+  terraform-bootstrap:
+    name: Terraform - Bootstrap Backend
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap == true
+    env:
+      TF_VAR_aws_region: ${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}
+      TF_VAR_bucket_name: ${{ secrets.TF_BACKEND_BUCKET || github.event.inputs.backend_bucket_name }}
+      TF_VAR_dynamodb_table_name: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE || github.event.inputs.backend_dynamodb_table_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Check AWS_ROLE_TO_ASSUME secret
+        run: |
+          if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME }}" ]; then
+            echo "ERROR: AWS_ROLE_TO_ASSUME secret is not set (env or repo)."
+            exit 1
+          else
+            echo "AWS_ROLE_TO_ASSUME secret present."
+          fi
+
+      - name: Configure AWS credentials (OIDC assume role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Bootstrap backend resources
+        working-directory: cicd/bootstrap
+        run: |
+          terraform init -input=false
+          terraform apply -input=false -auto-approve
+
   terraform-destroy:
     name: Terraform - Destroy
     runs-on: ubuntu-latest
     needs: terraform-plan
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.destroy == 'true'
+    if: github.event.inputs.bootstrap != true && github.event_name == 'workflow_dispatch' && github.event.inputs.destroy == true
     environment: production
+    env:
+      BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET || github.event.inputs.backend_bucket_name }}
+      BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY || 'cicd/terraform.tfstate' }}
+      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}
+      BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE || github.event.inputs.backend_dynamodb_table_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -146,7 +224,12 @@ jobs:
           audience: sts.amazonaws.com
 
       - name: Terraform Init
-        run: terraform init -input=false
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${BACKEND_BUCKET}" \
+            -backend-config="key=${BACKEND_KEY}" \
+            -backend-config="region=${BACKEND_REGION}" \
+            ${BACKEND_DYNAMODB_TABLE:+-backend-config="dynamodb_table=${BACKEND_DYNAMODB_TABLE}"}
 
       - name: Terraform Destroy Plan
         run: terraform plan -destroy -input=false -out=tfdestroy
