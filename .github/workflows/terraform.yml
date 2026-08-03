@@ -1,75 +1,116 @@
+# Terraform CI/CD workflow (OIDC + Terraform)
 name: Terraform CI/CD
 
 on:
   push:
-    branches: [main]
-    paths:
-      - '**/*.tf'
-      - '.github/workflows/terraform.yml'
+    branches:
+      - '**'
   pull_request:
-    branches: [main]
-    paths:
-      - '**/*.tf'
-      - '.github/workflows/terraform.yml'
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
-  contents: read
   id-token: write
+  contents: read
 
 env:
-  TF_VERSION: 1.12.2
-  AWS_REGION: us-east-1
+  TF_VERSION: "1.5.7"
+  AWS_REGION: "us-east-1"
 
 jobs:
-  terraform:
+  terraform-plan:
+    name: Terraform — Plan & Validate
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # Replace current "Verify AWS role variable" step with:
-      - name: Verify AWS role variable
-        run: |
-          if [ -z "${{ vars.AWS_ROLE_TO_ASSUME || secrets.AWS_ROLE_TO_ASSUME }}" ]; then
-            echo "AWS_ROLE_TO_ASSUME is not set in repository Variables or Secrets."
-            exit 1
-          fi
-          echo "AWS_ROLE_TO_ASSUME is configured."
-            
-      # And update the Configure AWS credentials step's role-to-assume:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME || secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
-          role-session-name: github-actions-${{ github.run_id }}
+      # OPTIONAL DEBUG: temporarily decode ID token for troubleshooting (UNCOMMENT while debugging)
+      # - name: Debug OIDC token (temporary)
+      #   run: |
+      #     TOKEN=$(curl -s -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL?audience=sts.amazonaws.com")
+      #     if [ -z "$TOKEN" ]; then echo "No token returned — check permissions: id-token: write"; exit 1; fi
+      #     PAYLOAD=$(echo "$TOKEN" | cut -d'.' -f2)
+      #     python - <<PY
+      # import sys,base64,json
+      # p=sys.stdin.read().strip().replace('-', '+').replace('_','/')
+      # p += '=' * (-len(p) % 4)
+      # print(json.dumps(json.loads(base64.b64decode(p)), indent=2))
+      # PY <<<"$PAYLOAD"
 
-      - name: Terraform fmt
-        run: terraform fmt -check -recursive
+      - name: Check AWS_ROLE_TO_ASSUME secret
+        run: |
+          if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME }}" ]; then
+            echo "ERROR: AWS_ROLE_TO_ASSUME secret is not set (repo or environment secret)."
+            exit 1
+          else
+            echo "AWS_ROLE_TO_ASSUME secret present."
+          fi
+
+      - name: Configure AWS credentials (OIDC assume role)
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          oidc: true
+          audience: sts.amazonaws.com
 
       - name: Terraform init
         run: terraform init -input=false
+
+      - name: Terraform fmt (check)
+        run: terraform fmt -check -diff
 
       - name: Terraform validate
         run: terraform validate
 
       - name: Terraform plan
-        run: terraform plan -input=false -no-color -out=tfplan
+        run: terraform plan -input=false -out=tfplan
 
       - name: Upload plan artifact
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-plan
+          name: tfplan
           path: tfplan
 
-      - name: Terraform apply
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        run: terraform apply -input=false -auto-approve tfplan
+  terraform-apply:
+    name: Terraform — Apply
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment: production            # <-- set this to the environment you create in repo settings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Check AWS_ROLE_TO_ASSUME secret
+        run: |
+          if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME }}" ]; then
+            echo "ERROR: AWS_ROLE_TO_ASSUME secret is not set (env or repo)."
+            exit 1
+          else
+            echo "AWS_ROLE_TO_ASSUME secret present."
+          fi
+
+      - name: Configure AWS credentials (OIDC assume role)
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+          oidc: true
+          audience: sts.amazonaws.com
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan*](#)
