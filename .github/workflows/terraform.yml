@@ -16,7 +16,7 @@ on:
         type: boolean
       bootstrap:
         description: 'Create the S3 backend bucket and DynamoDB lock table before using the remote backend'
-        required: true
+        required: false
         default: 'false'
         type: boolean
       backend_bucket_name:
@@ -44,7 +44,7 @@ jobs:
     env:
       BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET || github.event.inputs.backend_bucket_name }}
       BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY || 'cicd/terraform.tfstate' }}
-      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}
+      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || 'us-east-1' }}
       BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE || github.event.inputs.backend_dynamodb_table_name }}
     #environment: dev
     steps:
@@ -103,7 +103,7 @@ jobs:
     env:
       BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET || github.event.inputs.backend_bucket_name }}
       BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY || 'cicd/terraform.tfstate' }}
-      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}
+      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || 'us-east-1' }}
       BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE || github.event.inputs.backend_dynamodb_table_name }}
     #environment: dev
     steps:
@@ -196,7 +196,7 @@ jobs:
     env:
       BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET || github.event.inputs.backend_bucket_name }}
       BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY || 'cicd/terraform.tfstate' }}
-      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}
+      BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION || 'us-east-1' }}
       BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE || github.event.inputs.backend_dynamodb_table_name }}
     steps:
       - name: Checkout
